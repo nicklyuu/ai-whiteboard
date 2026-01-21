@@ -1,65 +1,182 @@
-import Image from "next/image";
+'use client';
+
+import { useState, useRef, useEffect } from 'react';
+import Whiteboard from '@/components/Whiteboard';
+import useStore from '@/store/useStore';
+import { Send, Mic, Bot, User, Sparkles } from 'lucide-react';
+import { Node, Edge, MarkerType } from 'reactflow';
 
 export default function Home() {
+  const [inputValue, setInputValue] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const messages = useStore((state) => state.messages);
+  const addMessage = useStore((state) => state.addMessage);
+  const addGraphData = useStore((state) => state.addGraphData);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom of chat
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  const handleSendMessage = () => {
+    if (!inputValue.trim() || isProcessing) return;
+
+    const userText = inputValue;
+    addMessage('user', userText);
+    setInputValue('');
+    setIsProcessing(true);
+
+    // Simulate AI Processing Delay
+    setTimeout(() => {
+      // 1. Generate fake response
+      const timestamp = Date.now();
+      const newNodes: Node[] = [];
+      const newEdges: Edge[] = [];
+
+      // Logic: Create a central node for the main topic, and branches for words
+      // This mimics "extracting concepts"
+      const rootId = `root-${timestamp}`;
+      
+      // Determine label from input (first few words)
+      const label = userText.length > 20 ? userText.slice(0, 20) + '...' : userText;
+
+      newNodes.push({
+        id: rootId,
+        type: 'input',
+        data: { label: label },
+        position: { x: 0, y: 0 },
+        style: { 
+            background: '#1e293b', 
+            color: 'white', 
+            border: 'none', 
+            borderRadius: '8px',
+            padding: '10px',
+            fontWeight: 'bold',
+            width: 160
+        },
+      });
+
+      // Split words to make fake children nodes
+      // In a real app, we'd parse JSON from LLM
+      const concepts = userText.split(' ').filter(w => w.length > 4).slice(0, 4);
+      
+      if (concepts.length === 0) {
+          // Fallback if no long words
+          concepts.push('Concept A', 'Concept B');
+      }
+
+      concepts.forEach((concept, idx) => {
+        const nodeId = `node-${timestamp}-${idx}`;
+        newNodes.push({
+            id: nodeId,
+            data: { label: concept },
+            position: { x: 0, y: 0 },
+            style: { 
+                background: '#ffffff', 
+                border: '1px solid #94a3b8', 
+                borderRadius: '6px',
+                width: 140
+            },
+        });
+        
+        newEdges.push({
+            id: `edge-${rootId}-${nodeId}`,
+            source: rootId,
+            target: nodeId,
+            type: 'smoothstep',
+            animated: true,
+            markerEnd: {
+                type: MarkerType.ArrowClosed,
+            },
+            style: { stroke: '#64748b' }
+        });
+      });
+
+      addGraphData(newNodes, newEdges);
+      addMessage('ai', `I've updated the whiteboard with concepts from: "${label}"`);
+      setIsProcessing(false);
+
+    }, 1200);
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className="flex h-screen w-screen overflow-hidden bg-white font-sans text-slate-900">
+      {/* Sidebar - Chat Interface */}
+      <div className="w-[350px] flex flex-col border-r border-slate-200 bg-white shadow-xl z-10">
+        {/* Header */}
+        <div className="p-4 border-b border-slate-100 flex items-center gap-2 bg-white">
+          <div className="bg-blue-600 p-1.5 rounded-lg">
+             <Bot className="w-5 h-5 text-white" />
+          </div>
+          <h1 className="font-bold text-slate-800">AI Architect</h1>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+
+        {/* Messages List */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-5 bg-slate-50" ref={scrollRef}>
+          {messages.map((msg) => (
+            <div
+              key={msg.id}
+              className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
+            >
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-sm ${
+                msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-white border border-slate-200 text-blue-600'
+              }`}>
+                {msg.role === 'user' ? <User size={16} /> : <Sparkles size={16} />}
+              </div>
+              <div className={`p-3 rounded-2xl max-w-[85%] text-sm leading-relaxed shadow-sm ${
+                msg.role === 'user' 
+                  ? 'bg-blue-600 text-white rounded-tr-sm' 
+                  : 'bg-white border border-slate-200 text-slate-700 rounded-tl-sm'
+              }`}>
+                {msg.content}
+              </div>
+            </div>
+          ))}
+          {isProcessing && (
+             <div className="flex gap-3">
+                 <div className="w-8 h-8 rounded-full bg-white border border-slate-200 flex items-center justify-center">
+                    <Sparkles size={16} className="text-blue-600 animate-pulse" />
+                 </div>
+                 <div className="text-xs text-slate-400 flex items-center">Thinking...</div>
+             </div>
+          )}
+        </div>
+
+        {/* Input Area */}
+        <div className="p-4 bg-white border-t border-slate-100">
+          <div className="relative">
+            <input
+              type="text"
+              className="w-full bg-slate-100 border-none rounded-xl py-3 pl-4 pr-12 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none transition-all"
+              placeholder="Describe your idea..."
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+              disabled={isProcessing}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            <button 
+              onClick={handleSendMessage}
+              disabled={!inputValue.trim() || isProcessing}
+              className="absolute right-2 top-1.5 p-1.5 bg-blue-600 rounded-lg text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <Send size={16} />
+            </button>
+          </div>
+          <div className="mt-2 flex justify-center">
+             <button className="text-slate-400 hover:text-slate-600 transition-colors">
+                <Mic size={18} />
+             </button>
+          </div>
         </div>
-      </main>
-    </div>
+      </div>
+
+      {/* Right Canvas */}
+      <div className="flex-1 relative bg-slate-50">
+        <Whiteboard />
+      </div>
+    </main>
   );
 }
