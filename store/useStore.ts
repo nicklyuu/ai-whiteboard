@@ -29,6 +29,7 @@ type RFState = {
   onConnect: (connection: Connection) => void;
   addMessage: (role: 'user' | 'ai', content: string) => void;
   addGraphData: (newNodes: Node[], newEdges: Edge[]) => void;
+  clearGraph: () => void;
   layout: (direction?: 'LR' | 'TB') => void;
   toggleFold: (nodeId: string) => void;
 };
@@ -43,6 +44,10 @@ const useStore = create<RFState>((set, get) => ({
       content: 'Hello! I am your whiteboard assistant. Tell me what to draw or explain a concept, and I will visualize it for you.' 
     }
   ],
+
+  clearGraph: () => {
+    set({ nodes: [], edges: [] });
+  },
 
   onNodesChange: (changes: NodeChange[]) => {
     const { nodes, edges } = get();
@@ -152,9 +157,17 @@ const useStore = create<RFState>((set, get) => ({
   addGraphData: (newNodes, newEdges) => {
     const { nodes, edges } = get();
     
-    // In a real app, you might want to check for duplicates or merge smartly
-    const updatedNodes = [...nodes, ...newNodes];
-    const updatedEdges = [...edges, ...newEdges];
+    // Deduplicate nodes based on ID
+    const existingNodeIds = new Set(nodes.map(n => n.id));
+    const uniqueNewNodes = newNodes.filter(n => !existingNodeIds.has(n.id));
+
+    // Deduplicate edges based on ID (or source-target combination if IDs are not reliable, 
+    // but we are generating IDs deterministically as edge-source-target)
+    const existingEdgeIds = new Set(edges.map(e => e.id));
+    const uniqueNewEdges = newEdges.filter(e => !existingEdgeIds.has(e.id));
+
+    const updatedNodes = [...nodes, ...uniqueNewNodes];
+    const updatedEdges = [...edges, ...uniqueNewEdges];
 
     // Apply layout
     const layouted = getLayoutedElements(updatedNodes, updatedEdges, 'LR');

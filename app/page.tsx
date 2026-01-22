@@ -3,9 +3,9 @@
 import { useState, useRef, useEffect } from 'react';
 import Whiteboard from '@/components/Whiteboard';
 import useStore from '@/store/useStore';
-import { generateMindMap } from '@/lib/gemini';
 import { Send, Mic, Bot, User, Sparkles } from 'lucide-react';
 import { Node, Edge, MarkerType } from 'reactflow';
+import { generateGraphData } from '@/lib/ai';
 
 export default function Home() {
   const [inputValue, setInputValue] = useState('');
@@ -13,8 +13,7 @@ export default function Home() {
   const messages = useStore((state) => state.messages);
   const addMessage = useStore((state) => state.addMessage);
   const addGraphData = useStore((state) => state.addGraphData);
-  const currentNodes = useStore((state) => state.nodes);
-  const currentEdges = useStore((state) => state.edges);
+  const clearGraph = useStore((state) => state.clearGraph);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom of chat
@@ -33,92 +32,53 @@ export default function Home() {
     setIsProcessing(true);
 
     try {
-      // Prepare context for AI (convert React Flow nodes/edges to simple format)
-      const contextNodes = currentNodes.map(n => ({ 
-        id: n.id, 
-        label: (n.data.label as string) || '', 
-        type: (n.data.type as any) || 'default'
-      }));
+      const currentNodes = useStore.getState().nodes;
+      const simplifiedNodes = currentNodes.map(n => ({ id: n.id, label: n.data.label }));
+      const response = await generateGraphData(userText, simplifiedNodes);
       
-      const contextEdges = currentEdges.map(e => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        label: (e.label as string) || ''
+      const graphData = response.graph || { nodes: [], edges: [] };
+      const reply = response.reply;
+      const shouldReset = response.shouldReset;
+
+      if (shouldReset) {
+        clearGraph();
+      }
+      
+      const newNodes = (graphData.nodes || []).map((node: any) => ({
+        id: node.id,
+        data: { label: node.label },
+        position: { x: 0, y: 0 },
+        style: { 
+            background: '#ffffff', 
+            border: '1px solid #94a3b8', 
+            borderRadius: '6px',
+            width: 140,
+            padding: '8px',
+            textAlign: 'center'
+        },
       }));
 
-      // Call Gemini API with context
-      const { graph, reply } = await generateMindMap(userText, contextNodes, contextEdges);
-      
-      // Create a unique prefix for this generation to avoid ID collisions
-      const prefix = `gen-${Date.now()}`;
-
-      // Helper to prefix IDs IF they are new nodes. 
-      // If the ID exists in currentNodes, we should keep it as is (to allow connection).
-      const getUniqueId = (id: string) => {
-          // Check if this ID refers to an existing node
-          const exists = currentNodes.some(n => n.id === id);
-          if (exists) return id;
-          return `${prefix}-${id}`;
-      };
-
-      // Helper to get style based on type
-      const getNodeStyle = (type?: string) => {
-        switch (type) {
-          case 'role':
-            return { background: '#dbeafe', borderColor: '#3b82f6' }; // blue-100, blue-500
-          case 'tech':
-            return { background: '#dcfce7', borderColor: '#22c55e' }; // green-100, green-500
-          case 'risk':
-            return { background: '#fee2e2', borderColor: '#ef4444' }; // red-100, red-500
-          case 'default':
-          default:
-            return { background: '#ffffff', borderColor: '#e2e8f0' }; // white, slate-200
-        }
-      };
-
-      // Convert to React Flow Nodes
-      const newNodes: Node[] = graph.nodes.map((node) => {
-        const style = getNodeStyle(node.type);
-        return {
-          id: getUniqueId(node.id),
-          data: { label: node.label, type: node.type || 'default' }, // Store type in data for future context
-          position: { x: 0, y: 0 }, // Initial position, will be calculated by dagre
-          type: 'default',
-          style: {
-            background: style.background,
-            color: '#334155',
-            border: `1px solid ${style.borderColor}`,
-            borderRadius: '8px',
-            padding: '10px',
-            width: 150,
-            fontSize: '12px',
-            fontWeight: 'normal',
-            textAlign: 'center',
-          },
-        };
-      });
-
-      // Convert to React Flow Edges
-      const newEdges: Edge[] = graph.edges.map((edge) => ({
-        id: getUniqueId(edge.id || `e-${edge.source}-${edge.target}`),
-        source: getUniqueId(edge.source),
-        target: getUniqueId(edge.target),
+      const newEdges = (graphData.edges || []).map((edge: any) => ({
+        id: `edge-${edge.source}-${edge.target}`,
+        source: edge.source,
+        target: edge.target,
         label: edge.label,
         type: 'smoothstep',
         animated: true,
         markerEnd: {
-          type: MarkerType.ArrowClosed,
+            type: MarkerType.ArrowClosed,
         },
-        style: { stroke: '#64748b' },
+        style: { stroke: '#64748b' }
       }));
 
-      addGraphData(newNodes, newEdges);
+      if (newNodes.length > 0 || newEdges.length > 0) {
+        addGraphData(newNodes, newEdges);
+      }
       addMessage('ai', reply);
 
     } catch (error) {
-      console.error('Failed to generate graph:', error);
-      addMessage('ai', 'Sorry, I failed to generate the visualization. Please try again.');
+      console.error("AI Error:", error);
+      addMessage('ai', "Sorry, I encountered an error while processing your request. Please try again.");
     } finally {
       setIsProcessing(false);
     }

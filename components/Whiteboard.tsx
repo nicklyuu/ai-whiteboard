@@ -16,7 +16,7 @@ import { useShallow } from 'zustand/react/shallow';
 import 'reactflow/dist/style.css';
 import useStore from '../store/useStore';
 import ContextMenu from './ContextMenu';
-import { expandNode } from '@/lib/gemini';
+import { expandNode } from '@/lib/ai';
 
 // Helper to select only needed state slices to prevent unnecessary re-renders
 const selector = (state: any) => ({
@@ -61,75 +61,48 @@ export default function Whiteboard() {
 
     try {
       const currentNodes = useStore.getState().nodes;
+      const addGraphData = useStore.getState().addGraphData;
+      const addMessage = useStore.getState().addMessage;
       
-      // Clean context nodes (same logic as generateMindMap)
-      const contextNodes = currentNodes.map(n => ({ 
-        id: n.id, 
-        label: (n.data.label as string), 
-        type: (n.data.type as any) 
+      // Prepare context string
+      const contextString = currentNodes.map(n => n.data.label).join(", ");
+
+      // Call AI
+      const graphData = await expandNode(id, label, contextString);
+      
+      const newNodes = graphData.nodes.map((node: any) => ({
+        id: node.id,
+        data: { label: node.label },
+        position: { x: 0, y: 0 },
+        style: { 
+            background: '#ffffff', 
+            border: '1px solid #94a3b8', 
+            borderRadius: '6px',
+            width: 140,
+            padding: '8px',
+            textAlign: 'center'
+        },
       }));
 
-      const { graph, reply } = await expandNode(label, id, contextNodes);
-      
-      const prefix = `exp-${Date.now()}`;
-
-      const getUniqueId = (nodeId: string) => {
-        const exists = currentNodes.some((n) => n.id === nodeId);
-        if (exists) return nodeId;
-        return `${prefix}-${nodeId}`;
-      };
-
-      const getNodeStyle = (type?: string) => {
-        switch (type) {
-          case 'role':
-            return { background: '#dbeafe', borderColor: '#3b82f6' };
-          case 'tech':
-            return { background: '#dcfce7', borderColor: '#22c55e' };
-          case 'risk':
-            return { background: '#fee2e2', borderColor: '#ef4444' };
-          case 'default':
-          default:
-            return { background: '#ffffff', borderColor: '#e2e8f0' };
-        }
-      };
-
-      const newNodes: Node[] = graph.nodes.map((node) => {
-        const style = getNodeStyle(node.type);
-        return {
-          id: getUniqueId(node.id),
-          data: { label: node.label, type: node.type || 'default' },
-          position: { x: 0, y: 0 },
-          type: 'default',
-          style: {
-            background: style.background,
-            color: '#334155',
-            border: `1px solid ${style.borderColor}`,
-            borderRadius: '8px',
-            padding: '10px',
-            width: 150,
-            fontSize: '12px',
-            fontWeight: 'normal',
-            textAlign: 'center',
-          },
-        };
-      });
-
-      const newEdges: Edge[] = graph.edges.map((edge) => ({
-        id: getUniqueId(edge.id || `e-${edge.source}-${edge.target}`),
-        source: getUniqueId(edge.source),
-        target: getUniqueId(edge.target),
+      const newEdges = graphData.edges.map((edge: any) => ({
+        id: `edge-${edge.source}-${edge.target}`,
+        source: edge.source,
+        target: edge.target,
         label: edge.label,
         type: 'smoothstep',
         animated: true,
-        markerEnd: { type: MarkerType.ArrowClosed },
-        style: { stroke: '#64748b' },
+        markerEnd: {
+            type: MarkerType.ArrowClosed,
+        },
+        style: { stroke: '#64748b' }
       }));
 
-      useStore.getState().addGraphData(newNodes, newEdges);
-      useStore.getState().addMessage('ai', reply);
+      addGraphData(newNodes, newEdges);
+      addMessage('ai', `I've expanded the concept: "${label}"`);
+
     } catch (error) {
-      console.error('Expand node error:', error);
-      useStore.getState().addMessage('ai', `展开 "${label}" 失败，请重试。`);
+      console.error('Failed to expand node:', error);
+      useStore.getState().addMessage('ai', 'Sorry, I failed to expand this node. Please try again.');
     }
   }, [menu]);
 
