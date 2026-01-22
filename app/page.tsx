@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import Whiteboard from '@/components/Whiteboard';
 import useStore from '@/store/useStore';
+import { generateMindMap } from '@/lib/gemini';
 import { Send, Mic, Bot, User, Sparkles } from 'lucide-react';
 import { Node, Edge, MarkerType } from 'reactflow';
 
@@ -12,6 +13,8 @@ export default function Home() {
   const messages = useStore((state) => state.messages);
   const addMessage = useStore((state) => state.addMessage);
   const addGraphData = useStore((state) => state.addGraphData);
+  const currentNodes = useStore((state) => state.nodes);
+  const currentEdges = useStore((state) => state.edges);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom of chat
@@ -21,7 +24,7 @@ export default function Home() {
     }
   }, [messages]);
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!inputValue.trim() || isProcessing) return;
 
     const userText = inputValue;
@@ -29,77 +32,96 @@ export default function Home() {
     setInputValue('');
     setIsProcessing(true);
 
-    // Simulate AI Processing Delay
-    setTimeout(() => {
-      // 1. Generate fake response
-      const timestamp = Date.now();
-      const newNodes: Node[] = [];
-      const newEdges: Edge[] = [];
-
-      // Logic: Create a central node for the main topic, and branches for words
-      // This mimics "extracting concepts"
-      const rootId = `root-${timestamp}`;
+    try {
+      // Prepare context for AI (convert React Flow nodes/edges to simple format)
+      const contextNodes = currentNodes.map(n => ({ 
+        id: n.id, 
+        label: (n.data.label as string) || '', 
+        type: (n.data.type as any) || 'default'
+      }));
       
-      // Determine label from input (first few words)
-      const label = userText.length > 20 ? userText.slice(0, 20) + '...' : userText;
+      const contextEdges = currentEdges.map(e => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        label: (e.label as string) || ''
+      }));
 
-      newNodes.push({
-        id: rootId,
-        type: 'input',
-        data: { label: label },
-        position: { x: 0, y: 0 },
-        style: { 
-            background: '#1e293b', 
-            color: 'white', 
-            border: 'none', 
+      // Call Gemini API with context
+      const { graph, reply } = await generateMindMap(userText, contextNodes, contextEdges);
+      
+      // Create a unique prefix for this generation to avoid ID collisions
+      const prefix = `gen-${Date.now()}`;
+
+      // Helper to prefix IDs IF they are new nodes. 
+      // If the ID exists in currentNodes, we should keep it as is (to allow connection).
+      const getUniqueId = (id: string) => {
+          // Check if this ID refers to an existing node
+          const exists = currentNodes.some(n => n.id === id);
+          if (exists) return id;
+          return `${prefix}-${id}`;
+      };
+
+      // Helper to get style based on type
+      const getNodeStyle = (type?: string) => {
+        switch (type) {
+          case 'role':
+            return { background: '#dbeafe', borderColor: '#3b82f6' }; // blue-100, blue-500
+          case 'tech':
+            return { background: '#dcfce7', borderColor: '#22c55e' }; // green-100, green-500
+          case 'risk':
+            return { background: '#fee2e2', borderColor: '#ef4444' }; // red-100, red-500
+          case 'default':
+          default:
+            return { background: '#ffffff', borderColor: '#e2e8f0' }; // white, slate-200
+        }
+      };
+
+      // Convert to React Flow Nodes
+      const newNodes: Node[] = graph.nodes.map((node) => {
+        const style = getNodeStyle(node.type);
+        return {
+          id: getUniqueId(node.id),
+          data: { label: node.label, type: node.type || 'default' }, // Store type in data for future context
+          position: { x: 0, y: 0 }, // Initial position, will be calculated by dagre
+          type: 'default',
+          style: {
+            background: style.background,
+            color: '#334155',
+            border: `1px solid ${style.borderColor}`,
             borderRadius: '8px',
             padding: '10px',
-            fontWeight: 'bold',
-            width: 160
+            width: 150,
+            fontSize: '12px',
+            fontWeight: 'normal',
+            textAlign: 'center',
+          },
+        };
+      });
+
+      // Convert to React Flow Edges
+      const newEdges: Edge[] = graph.edges.map((edge) => ({
+        id: getUniqueId(edge.id || `e-${edge.source}-${edge.target}`),
+        source: getUniqueId(edge.source),
+        target: getUniqueId(edge.target),
+        label: edge.label,
+        type: 'smoothstep',
+        animated: true,
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
         },
-      });
-
-      // Split words to make fake children nodes
-      // In a real app, we'd parse JSON from LLM
-      const concepts = userText.split(' ').filter(w => w.length > 4).slice(0, 4);
-      
-      if (concepts.length === 0) {
-          // Fallback if no long words
-          concepts.push('Concept A', 'Concept B');
-      }
-
-      concepts.forEach((concept, idx) => {
-        const nodeId = `node-${timestamp}-${idx}`;
-        newNodes.push({
-            id: nodeId,
-            data: { label: concept },
-            position: { x: 0, y: 0 },
-            style: { 
-                background: '#ffffff', 
-                border: '1px solid #94a3b8', 
-                borderRadius: '6px',
-                width: 140
-            },
-        });
-        
-        newEdges.push({
-            id: `edge-${rootId}-${nodeId}`,
-            source: rootId,
-            target: nodeId,
-            type: 'smoothstep',
-            animated: true,
-            markerEnd: {
-                type: MarkerType.ArrowClosed,
-            },
-            style: { stroke: '#64748b' }
-        });
-      });
+        style: { stroke: '#64748b' },
+      }));
 
       addGraphData(newNodes, newEdges);
-      addMessage('ai', `I've updated the whiteboard with concepts from: "${label}"`);
-      setIsProcessing(false);
+      addMessage('ai', reply);
 
-    }, 1200);
+    } catch (error) {
+      console.error('Failed to generate graph:', error);
+      addMessage('ai', 'Sorry, I failed to generate the visualization. Please try again.');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
