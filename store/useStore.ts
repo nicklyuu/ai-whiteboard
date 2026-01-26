@@ -14,6 +14,16 @@ import {
 } from 'reactflow';
 import { getLayoutedElements } from '../utils/layout';
 
+export type AppMode = 'lobby' | 'brainstorm' | 'structure' | 'planning';
+
+export interface ProjectContext {
+  name: string;
+  goal: string;
+  audience: string;
+  constraints: string;
+  isInitialized: boolean;
+}
+
 type ChatMessage = {
   id: string;
   role: 'user' | 'ai';
@@ -21,20 +31,33 @@ type ChatMessage = {
 };
 
 type RFState = {
+  appMode: AppMode;
+  projectContext: ProjectContext;
   nodes: Node[];
   edges: Edge[];
   messages: ChatMessage[];
   onNodesChange: OnNodesChange;
   onEdgesChange: OnEdgesChange;
   onConnect: (connection: Connection) => void;
+  setAppMode: (mode: AppMode) => void;
+  setProjectContext: (context: Partial<ProjectContext>) => void;
   addMessage: (role: 'user' | 'ai', content: string) => void;
   addGraphData: (newNodes: Node[], newEdges: Edge[]) => void;
   clearGraph: () => void;
+  setNodes: (nodes: Node[]) => void;
   layout: (direction?: 'LR' | 'TB') => void;
   toggleFold: (nodeId: string) => void;
 };
 
 const useStore = create<RFState>((set, get) => ({
+  appMode: 'lobby',
+  projectContext: {
+    name: '',
+    goal: '',
+    audience: '',
+    constraints: '',
+    isInitialized: false,
+  },
   nodes: [],
   edges: [],
   messages: [
@@ -45,9 +68,22 @@ const useStore = create<RFState>((set, get) => ({
     }
   ],
 
+  setAppMode: (mode) => set({ appMode: mode }),
+
+  setProjectContext: (context) => set((state) => ({
+    projectContext: { ...state.projectContext, ...context }
+  })),
+  
+  setNodes: (nodes) => set({ nodes }),
+
   clearGraph: () => {
     set({ nodes: [], edges: [] });
   },
+
+  removeNodes: (ids) => set((state) => ({
+    nodes: state.nodes.filter(n => !ids.includes(n.id)),
+    edges: state.edges.filter(e => !ids.includes(e.source) && !ids.includes(e.target))
+  })),
 
   onNodesChange: (changes: NodeChange[]) => {
     const { nodes, edges } = get();

@@ -24,3 +24,14 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* 🌊 让所有节点的移动都带有丝滑的物理惯性 */
+.react-flow__node {
+  /* 使用贝塞尔曲线实现类似 iOS 的回弹效果 */
+  transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+/* 🚫 关键点：当用户正在拖拽节点时，必须禁用过渡，否则会有严重的“不跟手”延迟感 */
+.react-flow__node.dragging,
+.react-flow__node.selected:active {
+  transition: none !important;
+}

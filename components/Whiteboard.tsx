@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useRef } from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -11,26 +11,63 @@ import ReactFlow, {
   Node,
   Edge,
   MarkerType,
+  BackgroundVariant
 } from 'reactflow';
 import { useShallow } from 'zustand/react/shallow';
 import 'reactflow/dist/style.css';
 import useStore from '../store/useStore';
 import ContextMenu from './ContextMenu';
 import { expandNode } from '@/lib/ai';
+import StickyNoteNode from './StickyNoteNode';
+import BrainstormToolbar from './BrainstormToolbar';
+import TrashBin from './TrashBin';
+
+const nodeTypes = {
+  'sticky-note': StickyNoteNode,
+};
 
 // Helper to select only needed state slices to prevent unnecessary re-renders
 const selector = (state: any) => ({
   nodes: state.nodes,
   edges: state.edges,
+  appMode: state.appMode,
+  projectContext: state.projectContext,
   onNodesChange: state.onNodesChange,
   onEdgesChange: state.onEdgesChange,
   onConnect: state.onConnect,
   toggleFold: state.toggleFold,
+  removeNodes: state.removeNodes,
 });
 
 export default function Whiteboard() {
-  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, toggleFold } = useStore(useShallow(selector));
+  const { nodes, edges, appMode, projectContext, onNodesChange, onEdgesChange, onConnect, toggleFold, removeNodes } = useStore(useShallow(selector));
   const [menu, setMenu] = useState<{ id: string; top: number; left: number; label: string } | null>(null);
+  const [isOverTrash, setIsOverTrash] = useState(false);
+  const trashBinRef = useRef<HTMLDivElement>(null);
+
+  const onNodeDrag = useCallback((event: React.MouseEvent, node: Node) => {
+    if (!trashBinRef.current) return;
+    
+    const trashRect = trashBinRef.current.getBoundingClientRect();
+    const { clientX, clientY } = event;
+  
+    // Simple collision detection
+    const isOver = 
+      clientX >= trashRect.left && 
+      clientX <= trashRect.right && 
+      clientY >= trashRect.top && 
+      clientY <= trashRect.bottom;
+  
+    setIsOverTrash(isOver);
+  }, []);
+  
+  const onNodeDragStop = useCallback((event: React.MouseEvent, node: Node) => {
+    if (isOverTrash) {
+      // Execute deletion
+      removeNodes([node.id]);
+      setIsOverTrash(false);
+    }
+  }, [isOverTrash, removeNodes]);
 
   const onNodeDoubleClick = useCallback(
     (event: React.MouseEvent, node: Node) => {
@@ -68,7 +105,7 @@ export default function Whiteboard() {
       const contextString = currentNodes.map(n => n.data.label).join(", ");
 
       // Call AI
-      const graphData = await expandNode(id, label, contextString);
+      const graphData = await expandNode(id, label, contextString, projectContext);
       
       const newNodes = graphData.nodes.map((node: any) => ({
         id: node.id,
@@ -106,32 +143,40 @@ export default function Whiteboard() {
     }
   }, [menu]);
 
+  // Dynamic Background Config based on Mode
+  const isBrainstorm = appMode === 'brainstorm';
+  const bgColor = isBrainstorm ? '#18181b' : '#f8fafc'; // Deep Zinc vs Slate-50
+  // Lighter dots for brainstorm mode to increase visibility without being overwhelming
+  const dotColor = isBrainstorm ? '#3f3f46' : '#e2e8f0'; 
+
   return (
-    <div className="w-full h-full bg-slate-50 relative">
+    <div className={`w-full h-full relative ${isBrainstorm ? 'bg-[#18181b]' : 'bg-slate-50'}`}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
+        nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onNodeContextMenu={onNodeContextMenu}
         onNodeDoubleClick={onNodeDoubleClick}
+        onNodeDrag={onNodeDrag}
+        onNodeDragStop={onNodeDragStop}
         onPaneClick={onPaneClick}
         fitView
         attributionPosition="bottom-right"
       >
-        <Background gap={16} size={1} color="#e2e8f0" />
-        <Controls />
+        <Background gap={24} size={2} color={dotColor} variant={BackgroundVariant.Dots} />
+        <Controls className={isBrainstorm ? 'bg-white/10 border-white/20 text-white fill-white' : ''} />
         <MiniMap 
             nodeColor={(node) => {
                 return '#3b82f6'; // blue-500
             }}
-            maskColor="rgb(241, 245, 249, 0.7)"
+            maskColor={isBrainstorm ? "rgba(0, 0, 0, 0.7)" : "rgb(241, 245, 249, 0.7)"}
+            className={isBrainstorm ? 'bg-neutral-800 border-neutral-700' : ''}
         />
-        <Panel position="top-right" className="bg-white/80 backdrop-blur p-2 rounded-lg shadow-sm border border-gray-100 text-xs text-gray-500">
-           AI Generated Canvas
-        </Panel>
       </ReactFlow>
+      <TrashBin ref={trashBinRef} isOver={isOverTrash} />
       {menu && (
         <ContextMenu
           x={menu.left}
@@ -140,6 +185,7 @@ export default function Whiteboard() {
           onClose={() => setMenu(null)}
         />
       )}
+      {appMode === 'brainstorm' && <BrainstormToolbar />}
     </div>
   );
 }
